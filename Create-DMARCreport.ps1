@@ -19,14 +19,14 @@
         4. Move non DMARC items to a different folder
         5. Unzip the downloaded attachment
         6. Load all the xml data and rearrange the data into a usable csv database
-        7. Create disk structure for per month reporting
-        8. Create a master html report containing data of last 6 months
-        9. Create sub html report per running month
-       10. If GEO is enabled enhance the reports with GEO country location information
-       11. If GEO is enabled Create country specific reports
-       12. If PowerBI is enable upload a incremental dataset to PowerBI API
-       13. HTML can be saved directly in a IIS published folder to have end to end automated reporting process
-       14. Optional Report to PowerBI
+        7. if failed or passed only param is present filter the data
+        8. Create disk structure for per month reporting
+        9. Create a master html report containing data of last 6 months
+       10. Create sub html report per running month
+       11. If GEO is enabled enhance the reports with GEO country location information
+       12. If GEO is enabled Create country specific reports
+       13. If PowerBI is enable upload a incremental dataset to PowerBI API
+       14. HTML can be saved directly in a IIS published folder to have end to end automated reporting process
 
 .EXAMPLE
     .\Create-DMARCreport.ps1 -dmarcmailbox "scriptkiddie@tech-savvy.nl" -dmarcmailboxpassword "1234"
@@ -49,11 +49,30 @@
     run under.
 
 .EXAMPLE
+    .\Create-DMARCreport.ps1 -dmarcmailbox "scriptkiddie@tech-savvy.nl" -dmarcmailboxusername "13th\script" -passwordfile "c:\mailboxpassword.bin" -DMARCpassedonly
+    
+    This sample will start the reporting generation process using minimal switches. 
+    It will use all the default folders and assumes 7zip is present in it. the reports in the mailbox are in
+    the default "Inbox" folder. It will filter and report only DMARC passed items.
+
+        -dmarcmailbox "scriptkiddie@tech-savvy.nl"
+            The DMARC mailbox to pull the reports from ( This will also be used as the username )
+        
+        -dmarcmailboxusername "13th\script"
+            Use a different username than the mailbox emailadress as username for authentication
+
+        -passwordfile .\mailboxpassword.bin
+            Use the secure credential in the file as the password for the mailbox
+
+        -DMARCpassedonly
+            Only emails that passed DMARC checks will be included in the reports
+
+.EXAMPLE
     .\Create-DMARCreport.ps1 -dmarcmailbox "scriptkiddie@tech-savvy.nl" -dmarcmailboxusername "13th\script" -passwordfile "c:\mailboxpassword.bin" -DMARCfailedonly
     
     This sample will start the reporting generation process using minimal switches. 
     It will use all the default folders and assumes 7zip is present in it. the reports in the mailbox are in
-    the default "Inbox" folder.
+    the default "Inbox" folder. It will filter and report only DMARC failed items.
 
         -dmarcmailbox "scriptkiddie@tech-savvy.nl"
             The DMARC mailbox to pull the reports from ( This will also be used as the username )
@@ -151,7 +170,7 @@
     -----------------------------------------------------------------------------------------------------------------------------------
     Script name   : Create-DmarcReport.ps1
     Authors       : Martijn (Scriptkiddie) van Geffen
-    Version       : 2.0
+    Version       : 2.3
     dependancies  : EWS Managed API 2.0 or newer ( https://www.nuget.org/packages/Microsoft.Exchange.WebServices/ )
                     A version of open 7zip ( Included GNU LGPL license or via http://www.7-zip.org/ )
                     If PowerBI is used a PowerBI account with a Hybrid streaming API enabled as documented in the attached PowerBI document 
@@ -211,6 +230,20 @@
                                                                 Added Reports total of DMARC passed VS DMARC failed.
                                                                 Added tables for DMARC alignment of SPF.
                                                                 Added tables for DMARC alignment of DKIM.
+    20-04-2018            V2.1        Martijn van Geffen    Fixed issues:
+                                                                Fix filter logic for failed only parameter
+                                                            New Features:
+								                                Added new parameter DMARCfailedonly to generate reports on items failing DMARC only
+								                                Added new parameter DMARCpassedonly to generate reports on items passing DMARC only
+								                                Added Bypass parameter for office 365 autodiscover
+    02-05-2018            V2.2        Martijn van Geffen    Fixed issues:
+                                                                $Geocounter allways remained above 9950 due to not being cleared during the wait
+                                                                Fix a issue with DMARC domain being created as a systemobject[] in the reports
+                                                                Added CSV files to the exception list of expandable types by 7 zip
+    07-11-2018            V2.3        Martijn van Geffen    Fixed issues:
+                                                                Switched GEO IP provider as the old one depricated.
+                                                                Fixed a test-path error on empty variable when first run or first run of the month
+                                                                Updated the version of 7ZIP included due to a vulnerability in the old version
     -----------------------------------------------------------------------------------------------------------------------------------
 
 .COMPONENT
@@ -237,7 +270,9 @@ Param
 (
     # Param1 The mailbox containing the reports
     [Parameter(ParameterSetName='Defaultscriptrun',
-        Mandatory=$true)]    
+        Mandatory=$false)]
+    [Parameter(ParameterSetName='Defaultscriptrunpassed',
+        Mandatory=$false)]    
     [Parameter(ParameterSetName='Passwordfile',
         Mandatory=$true)] 
     [ValidateNotNullOrEmpty()]
@@ -246,6 +281,8 @@ Param
 
     # Param2 the password for the mailbox containing the reports
     [Parameter(ParameterSetName='Defaultscriptrun',
+        Mandatory=$false)]
+    [Parameter(ParameterSetName='Defaultscriptrunpassed',
         Mandatory=$false)] 
     [Parameter(ParameterSetName='Passwordfile',
         Mandatory=$false)]
@@ -254,12 +291,16 @@ Param
 
     # Param3 the password for the mailbox containing the reports
     [Parameter(ParameterSetName='Defaultscriptrun',
-        Mandatory=$true)]    
+        Mandatory=$false)]
+    [Parameter(ParameterSetName='Defaultscriptrunpassed',
+        Mandatory=$false)]  
     [ValidateNotNullOrEmpty()]
     [string]$dmarcmailboxpassword,
 
     # Param4 The location to 7zip
     [Parameter(ParameterSetName='Defaultscriptrun',
+        Mandatory=$false)]
+    [Parameter(ParameterSetName='Defaultscriptrunpassed',
         Mandatory=$false)]
     [Parameter(ParameterSetName='Passwordfile',
         Mandatory=$false)]   
@@ -268,7 +309,9 @@ Param
 
     # Param5 reports are not in the postvakin but in a other folder
     [Parameter(ParameterSetName='Defaultscriptrun',
-        Mandatory=$false)]    
+        Mandatory=$false)]
+    [Parameter(ParameterSetName='Defaultscriptrunpassed',
+        Mandatory=$false)]   
     [Parameter(ParameterSetName='Passwordfile',
         Mandatory=$false)] 
     [ValidateNotNullOrEmpty()]
@@ -276,7 +319,9 @@ Param
 
     # Param6 The folder to store the reports in
     [Parameter(ParameterSetName='Defaultscriptrun',
-        Mandatory=$false)]    
+        Mandatory=$false)]
+    [Parameter(ParameterSetName='Defaultscriptrunpassed',
+        Mandatory=$false)]   
     [Parameter(ParameterSetName='Passwordfile',
         Mandatory=$false)] 
     [ValidateNotNullOrEmpty()]
@@ -284,20 +329,26 @@ Param
 
     # Param7 Delete processed attachments from the work folder
     [Parameter(ParameterSetName='Defaultscriptrun',
-        Mandatory=$false)]    
+        Mandatory=$false)]
+    [Parameter(ParameterSetName='Defaultscriptrunpassed',
+        Mandatory=$false)]   
     [Parameter(ParameterSetName='Passwordfile',
         Mandatory=$false)] 
     [switch]$deleteprocesseditem,
 
     # Param8 Enable EWS tracing
     [Parameter(ParameterSetName='Defaultscriptrun',
-        Mandatory=$false)]    
+        Mandatory=$false)]
+    [Parameter(ParameterSetName='Defaultscriptrunpassed',
+        Mandatory=$false)]   
     [Parameter(ParameterSetName='Passwordfile',
         Mandatory=$false)] 
     [switch]$trace,
 
     # Param9 Limit the top X results to maximum of
     [Parameter(ParameterSetName='Defaultscriptrun',
+        Mandatory=$false)]
+    [Parameter(ParameterSetName='Defaultscriptrunpassed',
         Mandatory=$false)]
     [Parameter(ParameterSetName='Passwordfile',
         Mandatory=$false)] 
@@ -319,6 +370,8 @@ Param
     # Param12 IP table date to remove if older
     [Parameter(ParameterSetName='Defaultscriptrun',
         Mandatory=$false)]
+    [Parameter(ParameterSetName='Defaultscriptrunpassed',
+        Mandatory=$false)]
     [Parameter(ParameterSetName='Passwordfile',
         Mandatory=$false)]
     [ValidateNotNullOrEmpty()]
@@ -327,12 +380,16 @@ Param
     # Param13 Enable GEO data lookup
     [Parameter(ParameterSetName='Defaultscriptrun',
         Mandatory=$false)]
+    [Parameter(ParameterSetName='Defaultscriptrunpassed',
+        Mandatory=$false)]
     [Parameter(ParameterSetName='Passwordfile',
         Mandatory=$false)]
     [switch]$geolookupenabled,
 
     # Param14 Enable upload to powerBI
     [Parameter(ParameterSetName='Defaultscriptrun',
+        Mandatory=$false)]
+    [Parameter(ParameterSetName='Defaultscriptrunpassed',
         Mandatory=$false)]
     [Parameter(ParameterSetName='Passwordfile',
         Mandatory=$false)]
@@ -341,9 +398,27 @@ Param
     # Param15 Create reports for DMARC failed only
     [Parameter(ParameterSetName='Defaultscriptrun',
         Mandatory=$false)]
+    [Parameter(ParameterSetName='Defaultscriptrunpassed',
+        Mandatory=$false)]
     [Parameter(ParameterSetName='Passwordfile',
         Mandatory=$false)]
-    [switch]$DMARCfailedonly
+    [switch]$DMARCfailedonly,
+
+    # Param16 Create reports for DMARC passed only
+    [Parameter(ParameterSetName='Defaultscriptrunpassed',
+        Mandatory=$false)]
+    [Parameter(ParameterSetName='Passwordfile',
+        Mandatory=$false)]
+    [switch]$DMARCpassedonly,
+
+    # Param17 Skipp auutodiscover when using Office 365
+    [Parameter(ParameterSetName='Defaultscriptrun',
+        Mandatory=$false)]
+    [Parameter(ParameterSetName='Defaultscriptrunpassed',
+        Mandatory=$false)]
+    [Parameter(ParameterSetName='Passwordfile',
+        Mandatory=$false)]
+    [switch]$BypassautodiscoverforO365
 )
 
 
@@ -355,7 +430,7 @@ Param
 
 #region staticconfiguration
 
-$version= "2.0"
+$version= "2.3"
 
 #this is the graph character
 #9608= Blok , 164 = star 
@@ -370,7 +445,7 @@ $deletetoaction = "MoveToDeletedItems"
 
 #powerBI endpoint 
 #sample endpoint below
-#$endpoint = "https://api.powerbi.com/beta/c7ba2aa0-618b-4041-854f-44643d718003/datasets/8f69ca58-9a7d-4817-b273-64875be5b7c9/rows?key=RzT%2BBgaU0sNF%2BWH8XhdfgdKTSlJEkoBspQGghdfghdNbG8NWBtlQy6HqjczWvPvmsXyyJqaS5b6xhKphgg64nAv%2F5sIgENdXI%2Fg%3D%3D"
+#$endpoint = "https://api.powerbi.com/beta/c7ba2aa0-618b-4041-854f-44643d718003/datasets/8f69ca58-9a7d-4817-b273-64875be5b7c9/rows?key=RzT%2BBgaU0sNF%2BWH8XhdfgdKTSlJEkoBspQGghdfghdNbG8NWBtlQy6HqjczmsXyyJqaS5b6xhKphgg64nAv%2F5sIgENdXI%2Fg%3D%3D"
 $endpoint = ""
 
 #endregion staticconfiguration
@@ -1157,17 +1232,27 @@ $EWSconnection = New-Object -TypeName Microsoft.Exchange.WebServices.Data.Exchan
 $EWSconnection.Credentials = New-Object -TypeName Microsoft.Exchange.WebServices.Data.WebCredentials($credentials.UserName,$credentials.GetNetworkCredential().password)
 $EWSconnection.UserAgent = "Tech-savvy dmarc parser www.tech-savvy.nl"
 
+
 try
 {
     if ($trace.ispresent)
     {
         $EWSconnection.traceenabled=$true
     }
-    $EWSconnection.AutodiscoverUrl($dmarcmailbox, {$true})
-    if (!($EWSconnection.url))
+
+    if ($BypassautodiscoverforO365.IsPresent)
     {
-        throw "no connection" 
+        $EWSconnection.Url = "https://outlook.office365.com/EWS/Exchange.asmx"
+    }else
+    {
+        $EWSconnection.AutodiscoverUrl($dmarcmailbox, {$true})
+
+        if (!($EWSconnection.url))
+        {
+            throw "no connection" 
+        }
     }
+
 }catch
 {
     write-error -message "connection test failed for account $dmarcmailbox with real error : $($_.exception)"
@@ -1529,6 +1614,7 @@ if ([string]::IsNullOrWhiteSpace($allcompressedfiles))
             "*ps1" {write-output -InputObject "A ps1 file cant be extracted";$fileextractable = "No"}
             "*txt" {write-output -InputObject "A txt file cant be extracted";$fileextractable = "No"}
             "*bin" {write-output -InputObject "A bin file cant be extracted";$fileextractable = "No"}
+            "*csv" {write-output -InputObject "A csv file cant be extracted";$fileextractable = "No"}
             Default {$fileextractable = "Yes"}
         }
         
@@ -1696,6 +1782,7 @@ foreach ($record in $xml)
         #clear itterative variables
         $hostname = $null
         $ip = $null
+        $sleepcounter = $null
 
         #start loop
         $ip = $domainrecord.row.source_ip
@@ -1727,7 +1814,7 @@ foreach ($record in $xml)
 
         $temptable | Add-Member -Type NoteProperty -Name "processdate" -Value $date
         $temptable | Add-Member -Type NoteProperty -Name "orgname" -Value $record.feedback.report_metadata.org_name
-        $temptable | Add-Member -Type NoteProperty -Name "dmarcdomain" -Value $record.feedback.policy_published.domain
+        $temptable | Add-Member -Type NoteProperty -Name "dmarcdomain" -Value ([array]$record.feedback.policy_published.domain)[0]
         $temptable | Add-Member -Type NoteProperty -Name "sourceip" -Value $domainrecord.row.source_ip
         $temptable | Add-Member -Type NoteProperty -Name "sourcedomain" -Value $($hostname[0])
         $temptable | Add-Member -Type NoteProperty -Name "sourceipcount" -Value $domainrecord.row.count
@@ -1743,36 +1830,24 @@ foreach ($record in $xml)
         
         if ($geolookupenabled.IsPresent)
         {
-            $geouri = "http://freegeoip.net/json/" + $domainrecord.row.source_ip
+            #$geouri = "http://freegeoip.net/json/" + $domainrecord.row.source_ip This one is depricated and now needs APIKEYS
+            $geouri = "http://ip-api.com/json/" + $domainrecord.row.source_ip
             
             try
             {
+                #introduce sleep to reduce calls to below 150 per minute threshold now 120 due to delay
+                start-sleep -Milliseconds 500
                 $geodata = Invoke-RestMethod -Method Get -Uri $geouri
-                $geocounter++
-                if ($geocounter -gt 9950)
-                {
-
-                    Write-Warning -Message "Sleeping for 70 minutes due to throtteling on the GEO lookups."
-                    Write-Warning -Message "Run your this script at higher interval to prevent this"
-                    Write-Warning -Message "We can query a maximum of 10000 records per hour."
-                    $sleepcounter = 1
-                    do
-                    {
-                        Write-Warning -Message "Sleeping 10 minutes this is $sleepcounter of 7"    
-                        start-sleep -Seconds 600
-                        $sleepcounter++
-                    }while ( $sleepcounter -lt 8 )
-
-                }
-
+                
             }catch
             {
+            
             }
              
-            $temptable | Add-Member -Type NoteProperty -Name "latitude" -Value $geodata.latitude
-            $temptable | Add-Member -Type NoteProperty -Name "longitude" -Value $geodata.longitude
-            $temptable | Add-Member -Type NoteProperty -Name "country_name" -Value $geodata.country_name
-            $temptable | Add-Member -Type NoteProperty -Name "region_name" -Value $geodata.region_name
+            $temptable | Add-Member -Type NoteProperty -Name "latitude" -Value $geodata.lat
+            $temptable | Add-Member -Type NoteProperty -Name "longitude" -Value $geodata.lon
+            $temptable | Add-Member -Type NoteProperty -Name "country_name" -Value $geodata.country
+            $temptable | Add-Member -Type NoteProperty -Name "region_name" -Value $geodata.regionname
             $temptable | Add-Member -Type NoteProperty -Name "city" -Value $geodata.city
 
         }
@@ -1854,14 +1929,25 @@ foreach ($reportdir in $reportdirs)
 }
 
 
-#region Filter failed only if switch is present
+#region Filter failed or passed based on switches
 
-if ($DMARCfailedonly.ispresent)
+if ($DMARCfailedonly.ispresent -or $DMARCpassedonly.ispresent)
 {
-    $reporttable = $reporttable | Where-Object -FilterScript {$_.dmarcspf -eq "fail" -and $_.dmarcspf -eq "fail" }   
+    $reporttableoriginal = $reporttable
+    $reporttable = $reporttable.where({($_.dmarcspf -eq "pass" -and $_.spfresult -eq "pass") -or ($_.dmarcdkim -eq "pass" -and $_.dkimresult -eq "pass")}, "split")   
+
+    if ($DMARCpassedonly.ispresent)
+    {
+        $reporttable = $reporttable[0]
+    }
+
+    if ($DMARCfailedonly.ispresent -or $DMARCpassedonly.ispresent)
+    {
+        $reporttable = $reporttable[1]
+    }
 }
 
-#endregion Filter failed only if switch is present 
+#endregion Filter failed or passed based on switches 
 
 #endregion load all data 
 
@@ -1909,19 +1995,33 @@ if ($PowerBIuploadenabled.IsPresent)
     [array]$datafiles = Get-ChildItem -Path $reportstoragedirxml -Filter "*.csv" | Sort-Object -Property CreationTime -Descending
     $differancefile = $datafiles[0]
     $sourcefile = $datafiles[1]
-    if (test-path -path $sourcefile.fullname)
+    if ($sourcefile)
     {
-        $sourceobject = Import-Csv -Path $sourcefile.fullname
-    }else
-    {
-        $sourceobject = $null
+        if (test-path -path $sourcefile.fullname)
+        {
+            $sourceobject = Import-Csv -Path $sourcefile.fullname
+        }else
+        {
+            $sourceobject = $null
+        }
     }
     $differanceobject = import-csv -Path $differancefile.fullname
     $newrecords = Compare-Object -ReferenceObject $sourceobject -DifferenceObject $differanceobject
 
-    if ($DMARCfailedonly.ispresent)
+    if ($DMARCfailedonly.ispresent -or $DMARCpassedonly.ispresent)
     {
-        $newrecords = $newrecords.inputobject | Where-Object -FilterScript {$_.dmarcspf -eq "fail" -and $_.dmarcspf -eq "fail" }   
+        $newrecords = $newrecords.inputobject.where({($_.dmarcspf -eq "pass" -and $_.spfresult -eq "pass") -or ($_.dmarcdkim -eq "pass" -and $_.dkimresult -eq "pass")}, "split")   
+
+        if ($DMARCpassedonly.ispresent)
+        {
+            $reporttable = $reporttable[0]
+        }
+
+        if ($DMARCfailedonly.ispresent -or $DMARCpassedonly.ispresent)
+        {
+            $reporttable = $reporttable[1]
+        }
+
     }else
     {
         $newrecords = $newrecords.inputobject
@@ -1963,12 +2063,13 @@ foreach ($dateentry in $grouptotaldatapermonth)
 #create main report for all data
 $htmlbodyparts += "<H1>Reports totals for last $reportrange days</H1><br>" 
 
-if (!($DMARCfailedonly.ispresent))
+if (!($DMARCfailedonly.ispresent -or $DMARCpassedonly.ispresent))
 {
     $htmlbodyparts += "<H3>Total Failed DMARC Items VS Total passed DMARC items</H3><br>" 
 
-    $reporttablefailed = $reporttable | Where-Object -FilterScript {$_.dmarcspf -eq "fail" -and $_.dmarcspf -eq "fail" }   
-    
+    $reporttablefailed = $reporttable.where({($_.dmarcspf -eq "pass" -and $_.spfresult -eq "pass") -or ($_.dmarcdkim -eq "pass" -and $_.dkimresult -eq "pass")}, "split")   
+    $reporttablefailed = $reporttablefailed[1]
+
     $failedhtmltemp = $null  
     $failedhtmltemp = "1" | select @{name="Failed DMARC Checks of Total in report";expression={"$($reporttablefailed.count)/$($reporttable.count)"}},
         @{name="% part of total";expression={
